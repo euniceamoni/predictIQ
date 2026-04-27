@@ -56,7 +56,7 @@ impl EmailQueue {
             chrono::Utc::now().timestamp() as f64
         };
 
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
         let _: () = conn.zadd(EMAIL_QUEUE_KEY, job_id.to_string(), score)
             .await
             .context("Failed to add job to queue")?;
@@ -67,7 +67,7 @@ impl EmailQueue {
 
     /// Dequeue the next job for processing
     pub async fn dequeue(&self) -> Result<Option<Uuid>> {
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
 
         // Use ZPOPMIN to atomically get and remove the lowest score item
         let result: Option<(String, f64)> = conn
@@ -96,7 +96,7 @@ impl EmailQueue {
             .await?;
 
         // Remove from processing set
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
         let _: () = conn.srem(EMAIL_PROCESSING_KEY, job_id.to_string())
             .await
             .context("Failed to remove from processing set")?;
@@ -138,7 +138,7 @@ impl EmailQueue {
                     .await?;
 
                 // Add to retry queue
-                let mut conn = self.cache.manager.clone();
+                let mut conn = self.cache.get_connection().await?;
                 let _: () = conn.zadd(
                     EMAIL_RETRY_KEY,
                     job_id.to_string(),
@@ -161,7 +161,7 @@ impl EmailQueue {
                     .email_update_job_status(job_id, EmailJobStatus::Failed.as_str(), Some(error))
                     .await?;
 
-                let mut conn = self.cache.manager.clone();
+                let mut conn = self.cache.get_connection().await?;
                 let failed_at = chrono::Utc::now().timestamp() as f64;
                 let _: () = conn
                     .zadd(EMAIL_DEAD_LETTER_KEY, job_id.to_string(), failed_at)
@@ -177,7 +177,7 @@ impl EmailQueue {
             }
 
             // Remove from processing set
-            let mut conn = self.cache.manager.clone();
+            let mut conn = self.cache.get_connection().await?;
             let _: () = conn.srem(EMAIL_PROCESSING_KEY, job_id.to_string())
                 .await
                 .context("Failed to remove from processing set")?;
@@ -188,7 +188,7 @@ impl EmailQueue {
 
     /// Process retry queue - move jobs back to main queue if retry time has passed
     pub async fn process_retries(&self) -> Result<usize> {
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
         let now = chrono::Utc::now().timestamp() as f64;
 
         // Get all jobs that are ready to retry
@@ -219,7 +219,7 @@ impl EmailQueue {
 
     /// List all job IDs currently in the dead-letter set (oldest-failed first).
     pub async fn list_dead_letter(&self) -> Result<Vec<Uuid>> {
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
         let items: Vec<String> = conn
             .zrange(EMAIL_DEAD_LETTER_KEY, 0isize, -1isize)
             .await
@@ -233,7 +233,7 @@ impl EmailQueue {
 
     /// Move a job from the dead-letter set back to the main queue for reprocessing.
     pub async fn requeue_dead_letter(&self, job_id: Uuid) -> Result<bool> {
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
 
         let removed: usize = conn
             .zrem(EMAIL_DEAD_LETTER_KEY, job_id.to_string())
@@ -261,7 +261,7 @@ impl EmailQueue {
 
     /// Get queue statistics
     pub async fn get_stats(&self) -> Result<QueueStats> {
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
 
         let pending: usize = conn
             .zcard(EMAIL_QUEUE_KEY)
@@ -293,7 +293,7 @@ impl EmailQueue {
 
     /// Re-queue any jobs stuck in the processing set (e.g. from a previous crash)
     pub async fn recover_orphaned_jobs(&self) -> Result<usize> {
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
         let stale: Vec<String> = conn
             .smembers(EMAIL_PROCESSING_KEY)
             .await
@@ -318,7 +318,7 @@ impl EmailQueue {
 
     /// Get the number of jobs currently being processed.
     pub async fn get_processing_count(&self) -> Result<usize> {
-        let mut conn = self.cache.manager.clone();
+        let mut conn = self.cache.get_connection().await?;
         let count: usize = conn
             .scard(EMAIL_PROCESSING_KEY)
             .await

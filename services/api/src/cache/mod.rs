@@ -366,19 +366,29 @@ impl RedisCache {
         if let Ok(Some(cached)) = self.get_json(key).await {
             return Ok((cached, true));
         }
+
+        // Cache miss — call fetcher and store the result.
+        self.recompute_and_store(key, ttl, fetcher).await
     }
 
     async fn set_entry<T>(&self, key: &str, entry: &CachedEntry<T>, ttl: Duration) -> anyhow::Result<()>
     where
         T: Serialize,
     {
-        let mut conn = self.manager.clone();
+        let key = key.to_owned();
         let raw = serde_json::to_string(entry)?;
         // Store with a small grace period beyond the logical TTL so XFetch
         // can still serve the stale value while a refresh is in flight.
         let redis_ttl = ttl + Duration::from_secs(30);
-        let _: () = conn.set_ex(key, raw, redis_ttl.as_secs()).await?;
-        Ok(())
+        self.exec(|mut conn| {
+            let key = key.clone();
+            let raw = raw.clone();
+            async move {
+                let _: () = conn.set_ex(&key, raw, redis_ttl.as_secs()).await?;
+                Ok(())
+            }
+        })
+        .await
     }
 
     async fn recompute_and_store<T, F, Fut>(
@@ -386,13 +396,13 @@ impl RedisCache {
         entry_key: &str,
         ttl: Duration,
         fetcher: F,
-    ) -> anyhow::Result<T>
+    ) -> anyhow::Result<(T, bool)>
     where
         T: Serialize + DeserializeOwned + Clone,
         F: FnOnce() -> Fut,
         Fut: Future<Output = anyhow::Result<T>>,
     {
-        let start = std::time::Instant::now();
+        let _start = std::time::Instant::now();
         let value = fetcher().await?;
         // Best-effort write — don't fail the request if cache write fails.
         if let Err(e) = self.set_json(entry_key, &value, ttl).await {
@@ -417,6 +427,92 @@ impl RedisCache {
         }
         Ok(deleted)
     }
+
+    /// Atomically increment `key` and set its TTL on first increment.
+    /// Returns the new counter value. Used for Redis-backed rate limiting.
+    pub async fn incr_with_ttl(&self, key: &str, ttl: Duration) -> anyhow::Result<u64> {
+        let key = key.to_owned();
+        let ttl_secs = ttl.as_secs();
+        self.exec(|mut conn| {
+            let key = key.clone();
+            async move {
+                let script = redis::Script::new(
+                    r#"
+                    local current = redis.call('INCR', KEYS[1])
+                    if tonumber(current) == 1 then
+                        redis.call('EXPIRE', KEYS[1], ARGV[1])
+                    end
+                    return current
+                    "#,
+                );
+                Ok(script.key(&key).arg(ttl_secs).invoke_async(&mut conn).await?)
+            }
+        })
+        .await
+    }
+
+    /// Acquire a raw connection from the pool.
+    /// Prefer `exec` for most use cases; use this only when you need to hold
+    /// a connection across multiple commands (e.g. pipelined operations).
+    pub async fn get_connection(&self) -> anyhow::Result<deadpool_redis::Connection> {
+        if !self.cb.allow() {
+            anyhow::bail!("Redis circuit breaker is open");
+        }
+        self.pool.get().await.context("failed to acquire Redis connection")
+    }
+}
+
+// ── XFetch stampede protection types ────────────────────────────────────────
+
+/// A cached entry with metadata for probabilistic early expiry (XFetch).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedEntry<T> {
+    pub value: T,
+    /// Unix timestamp (seconds) when this entry expires.
+    pub expires_at: i64,
+    /// Measured recomputation time in seconds (delta for XFetch formula).
+    pub delta_secs: f64,
+}
+
+/// Configuration for stampede protection strategies.
+#[derive(Debug, Clone)]
+pub struct StampedeConfig {
+    /// Enable probabilistic early expiry (XFetch algorithm).
+    pub probabilistic_early_expiry: bool,
+    /// Enable mutex lock to serialise concurrent recomputations.
+    pub mutex_lock: bool,
+    /// Beta parameter for XFetch (higher = more aggressive early refresh).
+    pub xfetch_beta: f64,
+}
+
+impl Default for StampedeConfig {
+    fn default() -> Self {
+        Self {
+            probabilistic_early_expiry: true,
+            mutex_lock: true,
+            xfetch_beta: 1.0,
+        }
+    }
+}
+
+/// Returns `true` if the entry should be refreshed early (XFetch algorithm).
+/// Uses probabilistic early expiry: the closer to expiry and the longer the
+/// recomputation time, the more likely a refresh is triggered.
+pub fn xfetch_should_refresh<T>(entry: &CachedEntry<T>, beta: f64) -> bool {
+    let now = chrono::Utc::now().timestamp();
+    let ttl_remaining = entry.expires_at - now;
+    if ttl_remaining <= 0 {
+        return true;
+    }
+    // XFetch: refresh if -delta * beta * ln(rand) >= ttl_remaining
+    // Use a simple pseudo-random value derived from current time nanos.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    let rand_f: f64 = (nanos as f64 + 1.0) / (u32::MAX as f64 + 1.0); // (0, 1]
+    let score = -entry.delta_secs * beta * rand_f.ln();
+    score >= ttl_remaining as f64
 }
 
 #[cfg(test)]
@@ -724,6 +820,97 @@ impl InvalidationTag {
                 keys::dbq_statistics(),
                 keys::dbq_featured_markets(*featured_limit),
             ],
+        }
+    }
+}
+
+// ── Cache key categories ─────────────────────────────────────────────────────
+
+/// Logical grouping for cache keys, used for TTL configuration and metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyCategory {
+    Statistics,
+    FeaturedMarkets,
+    Content,
+    ChainMarket,
+    ChainPlatformStats,
+    ChainUserBets,
+    ChainOracleResult,
+    ChainTxStatus,
+    ChainHealth,
+    ChainLedger,
+    ChainSyncCursor,
+    Custom,
+}
+
+impl KeyCategory {
+    pub fn label(&self) -> &'static str {
+        match self {
+            KeyCategory::Statistics => "statistics",
+            KeyCategory::FeaturedMarkets => "featured_markets",
+            KeyCategory::Content => "content",
+            KeyCategory::ChainMarket => "chain_market",
+            KeyCategory::ChainPlatformStats => "chain_platform_stats",
+            KeyCategory::ChainUserBets => "chain_user_bets",
+            KeyCategory::ChainOracleResult => "chain_oracle_result",
+            KeyCategory::ChainTxStatus => "chain_tx_status",
+            KeyCategory::ChainHealth => "chain_health",
+            KeyCategory::ChainLedger => "chain_ledger",
+            KeyCategory::ChainSyncCursor => "chain_sync_cursor",
+            KeyCategory::Custom => "custom",
+        }
+    }
+}
+
+/// Per-category TTL configuration.
+#[derive(Debug, Clone)]
+pub struct TtlConfig {
+    pub statistics: Duration,
+    pub featured_markets: Duration,
+    pub content: Duration,
+    pub chain_market: Duration,
+    pub chain_platform_stats: Duration,
+    pub chain_user_bets: Duration,
+    pub chain_oracle_result: Duration,
+    pub chain_tx_status: Duration,
+    pub chain_health: Duration,
+    pub chain_ledger: Duration,
+    pub chain_sync_cursor: Duration,
+}
+
+impl Default for TtlConfig {
+    fn default() -> Self {
+        Self {
+            statistics: Duration::from_secs(60),
+            featured_markets: Duration::from_secs(300),
+            content: Duration::from_secs(600),
+            chain_market: Duration::from_secs(30),
+            chain_platform_stats: Duration::from_secs(120),
+            chain_user_bets: Duration::from_secs(60),
+            chain_oracle_result: Duration::from_secs(300),
+            chain_tx_status: Duration::from_secs(15),
+            chain_health: Duration::from_secs(10),
+            chain_ledger: Duration::from_secs(5),
+            chain_sync_cursor: Duration::from_secs(5),
+        }
+    }
+}
+
+impl TtlConfig {
+    pub fn get(&self, category: KeyCategory) -> Option<Duration> {
+        match category {
+            KeyCategory::Statistics => Some(self.statistics),
+            KeyCategory::FeaturedMarkets => Some(self.featured_markets),
+            KeyCategory::Content => Some(self.content),
+            KeyCategory::ChainMarket => Some(self.chain_market),
+            KeyCategory::ChainPlatformStats => Some(self.chain_platform_stats),
+            KeyCategory::ChainUserBets => Some(self.chain_user_bets),
+            KeyCategory::ChainOracleResult => Some(self.chain_oracle_result),
+            KeyCategory::ChainTxStatus => Some(self.chain_tx_status),
+            KeyCategory::ChainHealth => Some(self.chain_health),
+            KeyCategory::ChainLedger => Some(self.chain_ledger),
+            KeyCategory::ChainSyncCursor => Some(self.chain_sync_cursor),
+            KeyCategory::Custom => None,
         }
     }
 }
