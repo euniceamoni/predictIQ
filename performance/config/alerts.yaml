@@ -167,6 +167,49 @@ groups:
           summary: "High CPU usage"
           description: "CPU usage is {{ $value }}%, exceeding 80% threshold"
 
+  - name: tts_quota
+    interval: 1m
+    rules:
+      - alert: TTSHighRequestRate
+        expr: rate(tts_requests_total[1m]) > 800
+        for: 2m
+        labels:
+          severity: warning
+          component: tts
+        annotations:
+          summary: "TTS request rate approaching Google Cloud quota"
+          description: "TTS request rate is {{ $value }} req/min, approaching the 1000 req/min soft quota limit"
+
+      - alert: TTSQuotaNearExhaustion
+        expr: rate(tts_requests_total[1m]) > 950
+        for: 1m
+        labels:
+          severity: critical
+          component: tts
+        annotations:
+          summary: "TTS request rate critical — quota exhaustion imminent"
+          description: "TTS request rate is {{ $value }} req/min, Google Cloud quota limit is 1000 req/min"
+
+      - alert: TTSHighErrorRate
+        expr: rate(tts_requests_total{status=~"4..|5.."}[5m]) / rate(tts_requests_total[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          component: tts
+        annotations:
+          summary: "TTS service elevated error rate"
+          description: "TTS error rate is {{ $value | humanizePercentage }}, possibly caused by quota exhaustion or provider outage"
+
+      - alert: TTSHighLatency
+        expr: histogram_quantile(0.95, rate(tts_request_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: tts
+        annotations:
+          summary: "TTS p95 latency exceeds 10 s"
+          description: "TTS p95 response time is {{ $value }}s — check Google Cloud TTS API status and quota"
+
   - name: performance_regression
     interval: 1h
     rules:

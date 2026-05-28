@@ -163,6 +163,82 @@ async function processJob(job: TTSJob) {
 }
 ```
 
+## Correlating Traces with Logs
+
+OpenTelemetry injects `trace_id` and `span_id` into the active context. Both services are configured to emit these fields in structured log output so every log line can be linked back to its trace.
+
+### How trace IDs appear in logs
+
+**API Service (Rust)** — `tracing-opentelemetry` automatically attaches the active span's trace/span IDs to each `tracing` event. With a JSON formatter the output looks like:
+
+```json
+{
+  "timestamp": "2024-08-15T12:34:56.789Z",
+  "level": "INFO",
+  "message": "market resolved",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "span_id": "00f067aa0ba902b7",
+  "service.name": "predictiq-api"
+}
+```
+
+**TTS Service (TypeScript)** — spans created via `@opentelemetry/api` expose IDs through the active context:
+
+```typescript
+import { trace, context } from "@opentelemetry/api";
+
+function logWithTrace(message: string, extra: Record<string, unknown> = {}) {
+  const span = trace.getActiveSpan();
+  const spanContext = span?.spanContext();
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    message,
+    trace_id: spanContext?.traceId ?? "none",
+    span_id: spanContext?.spanId ?? "none",
+    ...extra,
+  }));
+}
+```
+
+### Finding related logs from a trace ID
+
+Copy the `traceId` from the Jaeger UI (trace detail view → top-level span header).
+
+#### CloudWatch Logs Insights
+
+```sql
+-- All log lines for a specific trace
+fields @timestamp, message, span_id, service_name
+| filter trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+| sort @timestamp asc
+| limit 200
+```
+
+```sql
+-- Error logs for traces in the last hour
+fields @timestamp, message, trace_id, span_id
+| filter level = "ERROR"
+| filter ispresent(trace_id)
+| sort @timestamp desc
+| limit 100
+```
+
+```sql
+-- Latency distribution grouped by trace
+stats count(*) as log_count, min(@timestamp) as start, max(@timestamp) as end
+| by trace_id
+| sort log_count desc
+```
+
+Run queries from the CloudWatch console → **Log Insights** → select the `/predictiq/api` and `/predictiq/tts` log groups simultaneously to see correlated output from both services in one result set.
+
+#### Jaeger → CloudWatch workflow
+
+1. Open the Jaeger UI at `http://localhost:16686` and find the slow or erroring trace.
+2. Copy the **Trace ID** from the URL or the trace header (e.g., `4bf92f3577b34da6a3ce929d0e0e4736`).
+3. Paste it into the CloudWatch Logs Insights `trace_id` filter above.
+4. The result shows every structured log line emitted during that request's lifetime, across all services.
+
 ## Troubleshooting
 
 ### No traces appearing in Jaeger
