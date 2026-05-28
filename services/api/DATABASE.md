@@ -18,21 +18,35 @@ This service uses PostgreSQL. Schema and seed scripts are in:
 
 ## Migration Files
 
-1. `001_enable_pgcrypto.sql`
-2. `002_create_newsletter_subscriptions.sql` — creates `newsletter_subscribers` table
-3. `003_create_contact_form_submissions.sql`
-4. `004_create_waitlist_entries.sql`
-5. `005_create_content_management.sql`
-6. `006_create_analytics_events.sql`
-7. `007_create_audit_logs.sql`
-8. `008_create_email_tracking.sql`
-9. `009_add_newsletter_indexes.sql` — performance indexes on `newsletter_subscribers`
-10. `010_create_audit_log.sql` — append-only `audit_log` table for admin operations
+1. `000_create_schema_migrations.sql`
+2. `001_enable_pgcrypto.sql`
+3. `002_create_newsletter_subscriptions.sql` — creates `newsletter_subscribers` table
+4. `003_create_contact_form_submissions.sql`
+5. `004_create_waitlist_entries.sql`
+6. `005_create_content_management.sql`
+7. `006_create_analytics_events.sql`
+8. `007_create_audit_logs.sql`
+9. `008_create_email_tracking.sql`
+10. `009_add_newsletter_indexes.sql` — performance indexes on `newsletter_subscribers`
 11. `010_add_soft_delete_newsletter.sql` — adds `deleted_at` to `newsletter_subscribers`
+12. `010_create_audit_log.sql` — append-only `audit_log` table for admin operations
+13. `011_create_markets.sql` — creates `markets` table
+14. `012_add_performance_indexes.sql` — composite indexes on `markets` and `content` (promoted from `sql/`)
 
 > **Note:** Two migration files share the `010_` prefix. Apply them in lexicographic
 > order (`010_add_soft_delete_newsletter.sql` before `010_create_audit_log.sql`) or
 > rename one to `011_` to avoid ambiguity with migration runners that sort by filename.
+
+## sql/ Directory
+
+`services/api/sql/` contains **query templates and ad-hoc reference SQL** — not schema migrations.
+
+| File | Purpose |
+|---|---|
+| `performance_indexes.sql` | Source for the indexes now in `012_add_performance_indexes.sql`. Kept as a reference; do not apply manually. |
+| `newsletter_schema.sql` | Early draft of the `newsletter_subscribers` schema. Superseded by `002_create_newsletter_subscriptions.sql`. Do not apply manually. |
+
+> **Rule:** No schema-altering SQL should be applied from `sql/` directly. All schema changes must go through a numbered migration in `database/migrations/`.
 
 ## Connection Pool Configuration
 
