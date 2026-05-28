@@ -49,19 +49,19 @@ jobs:
           override: true
 
       - name: Cache cargo registry
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo index
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo build
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -92,7 +92,7 @@ jobs:
           override: true
 
       - name: Cache dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -121,7 +121,7 @@ jobs:
           override: true
 
       - name: Cache dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -147,7 +147,7 @@ jobs:
           override: true
 
       - name: Cache dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -163,7 +163,7 @@ jobs:
         working-directory: contracts/predict-iq
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: "18"
 
@@ -174,7 +174,7 @@ jobs:
 
       - name: Upload benchmark report
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: gas-benchmark-report
           path: contracts/predict-iq/target/gas-benchmark-report.md
@@ -182,7 +182,7 @@ jobs:
 
       - name: Comment PR with benchmark results
         if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v6
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -221,7 +221,7 @@ jobs:
           override: true
 
       - name: Cache dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -237,7 +237,7 @@ jobs:
         working-directory: contracts/predict-iq
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: "18"
 
@@ -302,7 +302,7 @@ jobs:
           --html --output-dir ../../coverage-reports/predictiq-api-html
 
       - name: Upload HTML + LCOV artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: |
@@ -367,7 +367,7 @@ jobs:
           generateSarif: true
 
       - name: Upload Semgrep SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: semgrep.sarif
@@ -421,7 +421,7 @@ jobs:
           exit-code: "1"
 
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-results.sarif
@@ -461,7 +461,7 @@ jobs:
           exit-code: "1"
 
       - name: Upload container scan SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-container.sarif
@@ -479,16 +479,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -615,7 +615,7 @@ jobs:
           override: true
 
       - name: Cache cargo dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -637,7 +637,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: "18"
           cache: "npm"
@@ -662,10 +662,198 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-market-creation-report
           path: frontend/playwright-report/
+          retention-days: 14
+
+  # ── #740: validate every migration has a rollback script ────────────────────
+  validate-migration-rollbacks:
+    name: Validate Migration Rollback Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check every migration has a rollback script
+        run: |
+          MISSING=0
+          MIGRATIONS_DIR="services/api/database/migrations"
+          ROLLBACKS_DIR="services/api/database/migrations/rollbacks"
+
+          for f in "$MIGRATIONS_DIR"/*.sql; do
+            base=$(basename "$f" .sql)
+            down="${ROLLBACKS_DIR}/${base}_down.sql"
+            if [ ! -f "$down" ]; then
+              echo "❌ Missing rollback: $down  (for $f)"
+              MISSING=1
+            else
+              echo "✅ $down"
+            fi
+          done
+
+          if [ "$MISSING" -eq 1 ]; then
+            echo ""
+            echo "One or more migrations are missing rollback scripts."
+            echo "Add the corresponding *_down.sql file in $ROLLBACKS_DIR."
+            exit 1
+          fi
+          echo ""
+          echo "All migration files have corresponding rollback scripts."
+
+      - name: Validate rollback SQL syntax (dry-run)
+        run: |
+          for f in services/api/database/migrations/rollbacks/*_down.sql; do
+            # psql --dry-run is not universally available; use a syntax check via
+            # pg_format or simply assert the file is non-empty and contains SQL keywords.
+            if [ ! -s "$f" ]; then
+              echo "❌ Empty rollback script: $f"
+              exit 1
+            fi
+            if ! grep -qiE "^(DROP|ALTER|DELETE|TRUNCATE)" "$f"; then
+              echo "❌ Rollback script appears to contain no DDL/DML: $f"
+              exit 1
+            fi
+            echo "✅ $f"
+          done
+
+  # ── #741: API Criterion benchmarks ───────────────────────────────────────────
+  api-criterion-benchmarks:
+    name: API Criterion Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-api-bench-${{ hashFiles('services/api/Cargo.lock') }}
+
+      - name: Run API benchmarks
+        run: cargo bench 2>&1 | tee ../../bench-output.txt
+        working-directory: services/api
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      - name: Parse benchmark output
+        run: |
+          node services/api/scripts/parse-bench-output.js \
+            bench-output.txt bench-results.json
+
+      - name: Compare against baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          node services/api/scripts/compare-api-benchmarks.js \
+            bench-results.json \
+            services/api/benches/.benchmarks/baseline.json \
+            --threshold 10
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-benchmark-results
+          path: |
+            bench-output.txt
+            bench-results.json
+          retention-days: 30
+
+  save-api-bench-baseline:
+    name: Save API Benchmark Baseline
+    runs-on: ubuntu-latest
+    needs: [api-criterion-benchmarks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-api-bench-${{ hashFiles('services/api/Cargo.lock') }}
+
+      - name: Run API benchmarks
+        run: cargo bench 2>&1 | tee ../../bench-output.txt
+        working-directory: services/api
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      - name: Parse and save new baseline
+        run: |
+          node services/api/scripts/parse-bench-output.js \
+            bench-output.txt \
+            services/api/benches/.benchmarks/baseline.json
+
+      - name: Commit updated baseline
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain services/api/benches/.benchmarks/)" ]; then
+            git add services/api/benches/.benchmarks/
+            git commit -m "chore: update API benchmark baseline for main branch"
+            git push origin main
+          else
+            echo "No baseline changes to commit."
+          fi
+
+  # ── #743: frontend unit-test coverage gate ───────────────────────────────────
+  frontend-unit-coverage:
+    name: Frontend Unit Test Coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest with coverage
+        run: npm run test:ci
+        env:
+          CI: "true"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-report
+          path: frontend/coverage/
           retention-days: 14
 
   all-tests-passed:
@@ -688,7 +876,36 @@ jobs:
       - build-optimized
       - api-cache-tests
       - e2e-market-creation
+      - documentation-sync
+      - validate-migration-rollbacks
+      - api-criterion-benchmarks
+      - frontend-unit-coverage
     runs-on: ubuntu-latest
     steps:
       - name: Success
         run: echo "All tests passed successfully!"
+
+  documentation-sync:
+    name: Documentation Sync Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      - name: Check API_SPEC.md is in sync with openapi.yaml
+        run: node scripts/generate-api-spec.js --check
+
+      - name: Fail if out of sync
+        if: failure()
+        run: |
+          echo "❌ API_SPEC.md is out of sync with openapi.yaml"
+          echo ""
+          echo "To fix this, run:"
+          echo "  node scripts/generate-api-spec.js"
+          echo "  git add API_SPEC.md"
+          echo "  git commit -m 'chore: regenerate API_SPEC.md'"
+          exit 1

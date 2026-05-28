@@ -8,12 +8,20 @@ This directory contains all infrastructure definitions for PredictIQ using Terra
 infrastructure/
 ├── terraform/
 │   ├── main.tf              # Main configuration
-│   ├── variables.tf         # Variable definitions
+│   ├── variables.tf         # Variable definitions with validation
 │   ├── outputs.tf           # Output definitions
+│   ├── locals.tf            # Common tags and locals
+│   ├── bootstrap.sh         # Bootstrap script for state backend
+│   ├── backend-config.hcl   # Default backend configuration
 │   ├── environments/        # Environment-specific configurations
-│   │   ├── dev.tfvars
-│   │   ├── staging.tfvars
-│   │   └── prod.tfvars
+│   │   ├── README.md        # Environment separation documentation
+│   │   ├── dev.tfvars       # Development environment variables
+│   │   ├── staging/
+│   │   │   ├── terraform.tfvars
+│   │   │   └── backend.hcl
+│   │   └── production/
+│   │       ├── terraform.tfvars
+│   │       └── backend.hcl
 │   └── modules/             # Reusable modules
 │       ├── vpc/
 │       ├── rds/
@@ -33,12 +41,40 @@ infrastructure/
 
 ## Quick Start
 
+### Bootstrap Terraform State Backend (First Time Only)
+
+Before initializing Terraform, you must create the S3 bucket and DynamoDB table for remote state management:
+
+```bash
+cd infrastructure/terraform
+
+# Bootstrap for development environment
+./bootstrap.sh us-east-1 dev
+
+# Bootstrap for staging environment
+./bootstrap.sh us-east-1 staging
+
+# Bootstrap for production environment
+./bootstrap.sh us-east-1 prod
+```
+
+The bootstrap script will:
+1. Create an S3 bucket for Terraform state
+2. Enable versioning and encryption on the bucket
+3. Block public access to the bucket
+4. Create a DynamoDB table for state locking
+5. Enable point-in-time recovery on the DynamoDB table
+
 ### Initialize Terraform
 
 ```bash
 cd infrastructure/terraform
-terraform init
+
+# Initialize with backend configuration
+terraform init -backend-config=backend-config.hcl
 ```
+
+**Note:** The `backend-config.hcl` file contains the S3 bucket and DynamoDB table names. Update this file if you used different names during bootstrap.
 
 ### Plan Infrastructure Changes
 
@@ -47,21 +83,31 @@ terraform init
 terraform plan -var-file="environments/dev.tfvars"
 
 # For staging environment
-terraform plan -var-file="environments/staging.tfvars"
+terraform plan -var-file="environments/staging/terraform.tfvars"
 
 # For production environment
-terraform plan -var-file="environments/prod.tfvars"
+terraform plan -var-file="environments/production/terraform.tfvars"
 ```
 
 ### Apply Infrastructure Changes
 
 ```bash
 # Apply changes (requires approval)
-terraform apply -var-file="environments/prod.tfvars"
+terraform apply -var-file="environments/production/terraform.tfvars"
 
 # Auto-approve (use with caution)
-terraform apply -auto-approve -var-file="environments/prod.tfvars"
+terraform apply -auto-approve -var-file="environments/production/terraform.tfvars"
 ```
+
+## Environment Separation
+
+PredictIQ uses separate Terraform state files and backends for each environment:
+
+- **Development**: Local state (for testing only)
+- **Staging**: Remote state in S3 with DynamoDB locking
+- **Production**: Remote state in separate S3 bucket with DynamoDB locking
+
+See `environments/README.md` for detailed environment management instructions.
 
 ## Environments
 
