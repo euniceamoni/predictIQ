@@ -28,13 +28,16 @@
 // - `test_confidence_rounding_boundary_conditions`: Documents exact rounding behavior
 
 use super::oracles::*;
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use crate::errors::ErrorCode;
+use crate::types::OracleConfig;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{Address, Env, String};
 
 fn test_config(e: &Env) -> OracleConfig {
     OracleConfig {
         oracle_address: Address::generate(e),
         feed_id: String::from_str(e, "test_feed"),
-        min_responses: 1,
+        min_responses: Some(1),
         max_staleness_seconds: 300,
         max_confidence_bps: 200,
         strike_price: None,
@@ -45,7 +48,7 @@ fn create_config(e: &Env, max_confidence_bps: u64) -> OracleConfig {
     OracleConfig {
         oracle_address: Address::generate(e),
         feed_id: String::from_str(e, "test_feed"),
-        min_responses: 1,
+        min_responses: Some(1),
         max_staleness_seconds: 3600,
         max_confidence_bps,
         strike_price: None,
@@ -64,6 +67,7 @@ fn create_price(price: i64, conf: u64, timestamp: u64) -> PythPrice {
 #[test]
 fn test_validate_fresh_price() {
     let e = Env::default();
+    e.ledger().set_timestamp(1_700_000_000);
 
     let config = test_config(&e);
     let price = PythPrice {
@@ -80,6 +84,7 @@ fn test_validate_fresh_price() {
 #[test]
 fn test_reject_stale_price() {
     let e = Env::default();
+    e.ledger().set_timestamp(1_700_000_000);
 
     let config = test_config(&e);
     let price = PythPrice {
@@ -94,24 +99,59 @@ fn test_reject_stale_price() {
 }
 
 #[test]
+fn test_reject_price_older_than_max_staleness_constant() {
+    let e = Env::default();
+    e.ledger().set_timestamp(1_700_000_000);
+
+    let config = test_config(&e);
+    let price = PythPrice {
+        price: 100000,
+        conf: 1000,
+        expo: -2,
+        publish_time: e.ledger().timestamp() as i64 - (MAX_STALENESS_SECONDS as i64 + 1),
+    };
+
+    let result = validate_price(&e, &price, &config);
+    assert_eq!(result, Err(ErrorCode::StalePrice));
+}
+
+#[test]
 fn test_accept_price_at_exact_staleness_boundary() {
     let e = Env::default();
+    e.ledger().set_timestamp(1_700_000_000);
 
     let config = test_config(&e);
     let price = PythPrice {
         price: 100000,
         conf: 1000, // 1% of price - within 2% threshold
         expo: -2,
-        publish_time: e.ledger().timestamp() as i64 - 300, // exactly 300 seconds old (max_staleness_seconds)
+        publish_time: e.ledger().timestamp() as i64 - MAX_STALENESS_SECONDS as i64,
     };
 
     let result = validate_price(&e, &price, &config);
-    assert!(result.is_ok(), "Price at exact staleness boundary (age == max_staleness_seconds) should be accepted");
+    assert!(result.is_ok(), "Price at exact staleness boundary should be accepted");
+}
+
+#[test]
+fn test_validate_oracle_staleness_rejects_update_older_than_constant() {
+    let e = Env::default();
+    e.ledger().set_timestamp(1_700_000_000);
+
+    let config = test_config(&e);
+    let market_id = 42u64;
+    e.storage().persistent().set(
+        &OracleData::LastUpdate(market_id, 0u64),
+        &(e.ledger().timestamp() - MAX_STALENESS_SECONDS - 1),
+    );
+
+    let result = validate_oracle_staleness(&e, market_id, &config);
+    assert_eq!(result, Err(ErrorCode::StalePrice));
 }
 
 #[test]
 fn test_reject_low_confidence() {
     let e = Env::default();
+    e.ledger().set_timestamp(1_700_000_000);
 
     let config = test_config(&e);
     let price = PythPrice {
@@ -555,7 +595,7 @@ mod pyth_integration_tests {
         let config = OracleConfig {
             oracle_address: pyth_addr,
             feed_id: valid_feed_id(&e),
-            min_responses: 1,
+            min_responses: Some(1),
             max_staleness_seconds: 3600,
             max_confidence_bps: 500,
         strike_price: None,
@@ -579,7 +619,7 @@ mod pyth_integration_tests {
         let config = OracleConfig {
             oracle_address: pyth_addr,
             feed_id: String::from_str(&e, "not_a_valid_hex_feed_id"),
-            min_responses: 1,
+            min_responses: Some(1),
             max_staleness_seconds: 3600,
             max_confidence_bps: 500,
         strike_price: None,
@@ -615,7 +655,7 @@ mod pyth_integration_tests {
         let bad_config = OracleConfig {
             oracle_address: Address::generate(e),
             feed_id: String::from_str(e, "not_hex"),
-            min_responses: 1,
+            min_responses: Some(1),
             max_staleness_seconds: 3600,
             max_confidence_bps: 500,
         strike_price: None,
@@ -702,7 +742,7 @@ mod pyth_integration_tests {
         let bad_config = OracleConfig {
             oracle_address: Address::generate(&e),
             feed_id: String::from_str(&e, "not_hex"),
-            min_responses: 1,
+            min_responses: Some(1),
             max_staleness_seconds: 3600,
             max_confidence_bps: 500,
         strike_price: None,
@@ -756,7 +796,7 @@ mod pyth_integration_tests {
         let config = OracleConfig {
             oracle_address: pyth_addr,
             feed_id: valid_feed_id(&e),
-            min_responses: 1,
+            min_responses: Some(1),
             max_staleness_seconds: 60, // only 60s tolerance
             max_confidence_bps: 500,
         strike_price: None,
