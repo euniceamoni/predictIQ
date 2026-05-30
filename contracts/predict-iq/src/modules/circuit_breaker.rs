@@ -7,6 +7,8 @@ use soroban_sdk::Env;
 const COOLDOWN_SECONDS: u64 = 6 * 3600; // 6 hours
 /// Max operations allowed while in HalfOpen before auto-closing back to Closed.
 const HALF_OPEN_MAX_OPS: u32 = 5;
+/// Default threshold (max loss per block in stroops) used when none is stored.
+pub const DEFAULT_CIRCUIT_BREAKER_THRESHOLD: i128 = 1_000_000_000;
 
 use soroban_sdk::contracttype;
 
@@ -127,4 +129,60 @@ pub fn require_not_paused_for_high_risk(e: &Env) -> Result<(), ErrorCode> {
         return Err(ErrorCode::ContractPaused);
     }
     Ok(())
+}
+
+/// Governance: update the circuit breaker threshold (admin only).
+pub fn set_threshold(e: &Env, threshold: i128) -> Result<(), ErrorCode> {
+    admin::require_admin(e)?;
+    e.storage()
+        .instance()
+        .set(&ConfigKey::CircuitBreakerThreshold, &threshold);
+    Ok(())
+}
+
+/// Query the current circuit breaker threshold.
+pub fn get_threshold(e: &Env) -> i128 {
+    e.storage()
+        .instance()
+        .get(&ConfigKey::CircuitBreakerThreshold)
+        .unwrap_or(DEFAULT_CIRCUIT_BREAKER_THRESHOLD)
+}
+
+#[cfg(test)]
+mod threshold_tests {
+    use super::{get_threshold, set_threshold, DEFAULT_CIRCUIT_BREAKER_THRESHOLD};
+    use crate::modules::admin;
+    use crate::types::ConfigKey;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+
+    fn setup_admin(e: &Env) -> Address {
+        let admin = Address::generate(e);
+        admin::set_admin(e, admin.clone());
+        admin
+    }
+
+    #[test]
+    fn default_threshold_returned_when_not_set() {
+        let e = Env::default();
+        assert_eq!(get_threshold(&e), DEFAULT_CIRCUIT_BREAKER_THRESHOLD);
+    }
+
+    #[test]
+    fn admin_can_update_threshold() {
+        let e = Env::default();
+        e.mock_all_auths();
+        setup_admin(&e);
+        set_threshold(&e, 500_000_000).unwrap();
+        assert_eq!(get_threshold(&e), 500_000_000);
+    }
+
+    #[test]
+    fn threshold_stored_in_instance_storage() {
+        let e = Env::default();
+        e.mock_all_auths();
+        setup_admin(&e);
+        set_threshold(&e, 42).unwrap();
+        let stored: Option<i128> = e.storage().instance().get(&ConfigKey::CircuitBreakerThreshold);
+        assert_eq!(stored, Some(42));
+    }
 }

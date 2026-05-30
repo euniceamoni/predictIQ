@@ -115,11 +115,28 @@ pub fn cast_vote(
         return Err(ErrorCode::InsufficientVotingWeight);
     }
 
+    // Normalize to 18 decimal places so tokens with different precisions are comparable.
+    let token_decimals = get_token_decimals(e, &gov_token);
+    const NORMALIZED_DECIMALS: u32 = 18;
+    let normalized_weight = if token_decimals < NORMALIZED_DECIMALS {
+        let scale = 10i128.pow(NORMALIZED_DECIMALS - token_decimals);
+        actual_weight.saturating_mul(scale)
+    } else if token_decimals > NORMALIZED_DECIMALS {
+        let scale = 10i128.pow(token_decimals - NORMALIZED_DECIMALS);
+        actual_weight / scale
+    } else {
+        actual_weight
+    };
+
+    if normalized_weight == 0 {
+        return Err(ErrorCode::InsufficientVotingWeight);
+    }
+
     let vote = Vote {
         market_id,
         voter: voter.clone(),
         outcome,
-        weight: actual_weight,
+        weight: normalized_weight,
     };
 
     e.storage().persistent().set(&vote_key, &vote);
@@ -133,10 +150,10 @@ pub fn cast_vote(
 
     let tally_key = DataKey::VoteTally(market_id, outcome);
     let mut current_tally: i128 = e.storage().persistent().get(&tally_key).unwrap_or(0);
-    current_tally += actual_weight;
+    current_tally += normalized_weight;
     e.storage().persistent().set(&tally_key, &current_tally);
 
-    crate::modules::events::emit_vote_cast(e, market_id, voter, outcome, actual_weight);
+    crate::modules::events::emit_vote_cast(e, market_id, voter, outcome, normalized_weight);
 
     Ok(())
 }
@@ -152,6 +169,15 @@ fn try_get_balance_at(
     match e.try_invoke_contract::<i128, ErrorCode>(token, &Symbol::new(e, "balance_at"), args) {
         Ok(Ok(balance)) => Ok(balance),
         _ => Err(ErrorCode::OracleFailure),
+    }
+}
+
+/// Fetch the decimal precision of a token contract (defaults to 7 for Stellar native tokens).
+fn get_token_decimals(e: &Env, token: &Address) -> u32 {
+    let args: Vec<Val> = soroban_sdk::vec![e];
+    match e.try_invoke_contract::<u32, ErrorCode>(token, &Symbol::new(e, "decimals"), args) {
+        Ok(Ok(d)) => d,
+        _ => 7, // Stellar native token default
     }
 }
 
@@ -280,6 +306,8 @@ mod prune_tests {
         e.storage().persistent().set(
             &DataKey::Vote(market_id, v1.clone()),
             &Vote {
+                market_id,
+                voter: v1.clone(),
                 outcome: 0,
                 weight: 100,
             },
@@ -287,6 +315,8 @@ mod prune_tests {
         e.storage().persistent().set(
             &DataKey::Vote(market_id, v2.clone()),
             &Vote {
+                market_id,
+                voter: v2.clone(),
                 outcome: 1,
                 weight: 200,
             },
@@ -344,5 +374,55 @@ mod prune_tests {
             .storage()
             .persistent()
             .has(&DataKey::DisputeVoters(market_id)));
+    }
+}
+
+#[cfg(test)]
+mod decimal_normalization_tests {
+    /// Unit tests for the decimal normalization logic (no contract env needed).
+
+    const NORMALIZED_DECIMALS: u32 = 18;
+
+    fn normalize(balance: i128, token_decimals: u32) -> i128 {
+        if token_decimals < NORMALIZED_DECIMALS {
+            let scale = 10i128.pow(NORMALIZED_DECIMALS - token_decimals);
+            balance.saturating_mul(scale)
+        } else if token_decimals > NORMALIZED_DECIMALS {
+            let scale = 10i128.pow(token_decimals - NORMALIZED_DECIMALS);
+            balance / scale
+        } else {
+            balance
+        }
+    }
+
+    #[test]
+    fn seven_decimal_token_scaled_up() {
+        // 1 token with 7 decimals = 10_000_000 raw units
+        // normalized to 18 decimals = 10_000_000 * 10^11
+        let raw = 10_000_000i128;
+        let normalized = normalize(raw, 7);
+        assert_eq!(normalized, raw * 10i128.pow(11));
+    }
+
+    #[test]
+    fn eighteen_decimal_token_unchanged() {
+        let raw = 1_000_000_000_000_000_000i128;
+        assert_eq!(normalize(raw, 18), raw);
+    }
+
+    #[test]
+    fn higher_decimal_token_scaled_down() {
+        // 24 decimal token: divide by 10^6
+        let raw = 1_000_000_000_000_000_000_000_000i128;
+        let normalized = normalize(raw, 24);
+        assert_eq!(normalized, raw / 10i128.pow(6));
+    }
+
+    #[test]
+    fn equal_weights_after_normalization() {
+        // 1 token regardless of decimal precision should normalize to the same value
+        let one_7dec = normalize(10_000_000, 7);       // 1 token at 7 decimals
+        let one_18dec = normalize(1_000_000_000_000_000_000, 18); // 1 token at 18 decimals
+        assert_eq!(one_7dec, one_18dec);
     }
 }

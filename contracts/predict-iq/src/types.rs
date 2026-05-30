@@ -116,15 +116,19 @@ pub enum ConfigKey {
     ProtocolTreasury,
     GuardianSet,
     PendingUpgrade,
+    PendingUpgradePassedAt,
     UpgradeVotes,
     TimelockDuration,
     PendingGuardianRemoval,
+    PendingGuardianRemovalPassedAt,
     UpgradeRejectedAt(soroban_sdk::BytesN<32>),
     GovernanceToken,
     MaxPushPayoutWinners,
     DefaultDisputeWindow,
     MinDisputeWindow,
     MaxDisputeWindow,
+    CircuitBreakerThreshold,
+    PendingAdmin,
 }
 
 #[contracttype]
@@ -155,7 +159,7 @@ pub struct PendingUpgrade {
 
 // Constants for upgrade governance
 pub const TIMELOCK_DURATION: u64 = 48 * 60 * 60; // 48 hours in seconds
-pub const TIMELOCK_MIN_SECONDS: u64 = 3600; // 1 hour minimum
+pub const TIMELOCK_MIN_SECONDS: u64 = 24 * 60 * 60; // 24 hours minimum
 pub const TIMELOCK_MAX_SECONDS: u64 = 7 * 24 * 3600; // 7 days maximum
 pub const MAJORITY_THRESHOLD_PERCENT: u32 = 51; // 51% for majority
 pub const UPGRADE_COOLDOWN_DURATION: u64 = 7 * 24 * 3600; // 7 days cooldown for rejected upgrades

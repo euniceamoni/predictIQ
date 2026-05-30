@@ -29,6 +29,7 @@ announcement before being removed.
 - [Authentication](#authentication)
 - [Endpoints](#endpoints)
 - [Error Handling](#error-handling)
+- [Contract Error Codes](#contract-error-codes)
 - [Rate Limiting](#rate-limiting)
 
 ## Overview
@@ -93,6 +94,41 @@ All errors are returned as JSON with the following structure:
 | CONFLICT | 409 | Resource conflict (e.g., duplicate) |
 | RATE_LIMITED | 429 | Rate limit exceeded |
 | INTERNAL_ERROR | 500 | Internal server error |
+
+## Contract Error Codes
+
+When a blockchain endpoint proxies a Soroban contract call that fails, the API wraps the
+contract error in the standard error envelope with `code` set to `CONTRACT_ERROR` and a
+`details.contract_code` field containing the numeric error code.
+
+```json
+{
+  "error": {
+    "code": "CONTRACT_ERROR",
+    "message": "The market has been closed and no longer accepts bets or updates.",
+    "details": {
+      "contract_code": 103,
+      "variant": "MarketClosed"
+    }
+  }
+}
+```
+
+For the full list of contract error codes and their descriptions see
+[`docs/CONTRACT_ERRORS.md`](docs/CONTRACT_ERRORS.md).
+
+Quick reference for the most common codes:
+
+| Code | Variant | Description |
+|------|---------|-------------|
+| 101 | `NotAuthorized` | Caller lacks required authorization. |
+| 102 | `MarketNotFound` | No market exists with the given ID. |
+| 103 | `MarketClosed` | Market is closed; no bets or updates accepted. |
+| 107 | `InsufficientBalance` | Caller's token balance is too low. |
+| 115 | `MarketNotActive` | Market is not in an active state. |
+| 121 | `ContractPaused` | Contract is paused; all writes are disabled. |
+| 142 | `BetNotFound` | No bet found for the given ID or caller. |
+| 147 | `MarketNotResolved` | Market has not been resolved yet. |
 
 ## Rate Limiting
 

@@ -6,6 +6,7 @@ mod modules;
 mod test;
 pub mod pyth_client;
 pub mod types;
+mod test_pyth_integration;
 
 use crate::errors::ErrorCode;
 use crate::modules::admin;
@@ -32,6 +33,21 @@ impl PredictIQ {
 
     pub fn get_admin(e: Env) -> Option<Address> {
         admin::get_admin(&e)
+    }
+
+    /// Step 1: propose a new admin (current admin only). New admin must call accept_admin.
+    pub fn propose_admin(e: Env, new_admin: Address) -> Result<(), ErrorCode> {
+        admin::propose_admin(&e, new_admin)
+    }
+
+    /// Step 2: accept a pending admin transfer (pending admin only).
+    pub fn accept_admin(e: Env, caller: Address) -> Result<(), ErrorCode> {
+        admin::accept_admin(&e, caller)
+    }
+
+    /// Cancel a pending admin transfer (current admin only).
+    pub fn cancel_admin_transfer(e: Env) -> Result<(), ErrorCode> {
+        admin::cancel_admin_transfer(&e)
     }
 
     pub fn create_market(
@@ -171,6 +187,16 @@ impl PredictIQ {
         state: crate::types::CircuitBreakerState,
     ) -> Result<(), ErrorCode> {
         crate::modules::circuit_breaker::set_state(&e, state)
+    }
+
+    /// Governance: update the circuit breaker threshold (admin only).
+    pub fn set_circuit_breaker_threshold(e: Env, threshold: i128) -> Result<(), ErrorCode> {
+        crate::modules::circuit_breaker::set_threshold(&e, threshold)
+    }
+
+    /// Query the current circuit breaker threshold.
+    pub fn get_circuit_breaker_threshold(e: Env) -> i128 {
+        crate::modules::circuit_breaker::get_threshold(&e)
     }
 
     pub fn set_base_fee(e: Env, amount: i128) -> Result<(), ErrorCode> {
@@ -345,6 +371,10 @@ impl PredictIQ {
 
     pub fn vote_on_guardian_removal(e: Env, voter: Address, approve: bool) -> Result<(), ErrorCode> {
         crate::modules::governance::vote_on_guardian_removal(&e, voter, approve)
+    }
+
+    pub fn execute_guardian_removal(e: Env) -> Result<(), ErrorCode> {
+        crate::modules::governance::execute_guardian_removal(&e)
     }
 
     pub fn get_guardians(e: Env) -> Vec<crate::types::Guardian> {

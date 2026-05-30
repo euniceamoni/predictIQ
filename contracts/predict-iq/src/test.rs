@@ -729,6 +729,53 @@ fn test_add_guardian() {
     assert_eq!(stored_guardians.len(), 2);
 }
 
+#[test]
+fn test_guardian_removal_requires_timelock_after_majority() {
+    let (e, _admin, _contract_id, client) = setup_test_env();
+
+    let guardian1 = Address::generate(&e);
+    let guardian2 = Address::generate(&e);
+    let guardian3 = Address::generate(&e);
+
+    let mut guardians = Vec::new(&e);
+    guardians.push_back(types::Guardian {
+        address: guardian1.clone(),
+        voting_power: 1,
+    });
+    guardians.push_back(types::Guardian {
+        address: guardian2.clone(),
+        voting_power: 1,
+    });
+    guardians.push_back(types::Guardian {
+        address: guardian3.clone(),
+        voting_power: 1,
+    });
+
+    client.initialize_guardians(&guardians);
+    client.set_timelock_duration(&(24 * 3600));
+
+    e.ledger().set_timestamp(1000);
+    client.remove_guardian(&guardian3);
+
+    client.vote_on_guardian_removal(&guardian1, &true);
+    client.vote_on_guardian_removal(&guardian2, &true);
+
+    assert_eq!(
+        client.try_execute_guardian_removal(),
+        Err(Ok(ErrorCode::TimelockActive))
+    );
+    assert_eq!(client.get_guardians().len(), 3);
+
+    e.ledger().set_timestamp(1000 + 24 * 3600);
+    assert!(client.try_execute_guardian_removal().is_ok());
+
+    let stored_guardians = client.get_guardians();
+    assert_eq!(stored_guardians.len(), 2);
+    for guardian in stored_guardians.iter() {
+        assert_ne!(guardian.address, guardian3);
+    }
+}
+
 // Issue #19: Admin-Guardian separation tests
 
 #[test]
@@ -810,6 +857,33 @@ fn test_execute_upgrade_before_timelock_fails() {
     // Try to execute immediately - should fail with TimelockActive
     let result = client.try_execute_upgrade();
     assert_eq!(result, Err(Ok(ErrorCode::TimelockActive)));
+}
+
+#[test]
+fn test_execute_upgrade_timelock_starts_when_vote_passes() {
+    let (e, _admin, _contract_id, client) = setup_test_env();
+
+    let guardian = Address::generate(&e);
+    let mut guardians = Vec::new(&e);
+    guardians.push_back(types::Guardian {
+        address: guardian.clone(),
+        voting_power: 1,
+    });
+
+    client.initialize_guardians(&guardians);
+    client.set_timelock_duration(&(24 * 3600));
+
+    let wasm_hash = upgrade_wasm_hash(&e);
+    e.ledger().set_timestamp(1000);
+    client.initiate_upgrade(&wasm_hash);
+
+    e.ledger().set_timestamp(1000 + 24 * 3600 + 1);
+    client.vote_for_upgrade(&guardian, &true);
+
+    assert_eq!(client.try_execute_upgrade(), Err(Ok(ErrorCode::TimelockActive)));
+
+    e.ledger().set_timestamp(1000 + (2 * 24 * 3600) + 1);
+    assert!(client.try_execute_upgrade().is_ok());
 }
 
 #[test]
@@ -899,21 +973,21 @@ fn test_set_timelock_duration_and_early_execution() {
     });
     client.initialize_guardians(&guardians);
 
-    // Reduce timelock to 6 hours (minimum allowed)
-    let six_hours: u64 = 6 * 60 * 60;
-    assert!(client.try_set_timelock_duration(&six_hours).is_ok());
+    // Reduce timelock to 24 hours (minimum allowed)
+    let one_day: u64 = 24 * 60 * 60;
+    assert!(client.try_set_timelock_duration(&one_day).is_ok());
 
     let wasm_hash = upgrade_wasm_hash(&e);
     e.ledger().set_timestamp(1000);
     client.initiate_upgrade(&wasm_hash);
     client.vote_for_upgrade(&guardian, &true);
 
-    // Still blocked before 6 hours
-    e.ledger().set_timestamp(1000 + six_hours - 1);
+    // Still blocked before 24 hours
+    e.ledger().set_timestamp(1000 + one_day - 1);
     assert_eq!(client.try_execute_upgrade(), Err(Ok(ErrorCode::TimelockActive)));
 
-    // Succeeds exactly at 6 hours
-    e.ledger().set_timestamp(1000 + six_hours);
+    // Succeeds exactly at 24 hours
+    e.ledger().set_timestamp(1000 + one_day);
     assert!(client.try_execute_upgrade().is_ok());
 }
 
@@ -921,9 +995,9 @@ fn test_set_timelock_duration_and_early_execution() {
 fn test_set_timelock_duration_out_of_range_rejected() {
     let (_e, _admin, _contract_id, client) = setup_test_env();
 
-    // Below minimum (6h)
+    // Below minimum (24h)
     assert_eq!(
-        client.try_set_timelock_duration(&(6 * 3600 - 1)),
+        client.try_set_timelock_duration(&(24 * 3600 - 1)),
         Err(Ok(ErrorCode::InvalidAmount))
     );
     // Above maximum (7 days)
@@ -941,8 +1015,8 @@ fn test_get_timelock_duration_default_and_updated() {
     assert_eq!(client.get_timelock_duration(), 48 * 3600);
 
     // After update, reflects new value
-    client.set_timelock_duration(&(6 * 3600));
-    assert_eq!(client.get_timelock_duration(), 6 * 3600);
+    client.set_timelock_duration(&(24 * 3600));
+    assert_eq!(client.get_timelock_duration(), 24 * 3600);
 }
 
 #[test]

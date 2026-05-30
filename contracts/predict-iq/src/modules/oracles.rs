@@ -2,6 +2,9 @@ use crate::errors::ErrorCode;
 use crate::types::OracleConfig;
 use soroban_sdk::{contracttype, symbol_short, Bytes, Env, Map};
 
+pub const MAX_STALENESS: u64 = 60;
+pub const MAX_STALENESS_SECONDS: u64 = MAX_STALENESS;
+
 #[contracttype]
 pub enum OracleData {
     Result(u64, u32),     // market_id -> outcome
@@ -54,7 +57,7 @@ pub fn validate_price(e: &Env, price: &PythPrice, config: &OracleConfig) -> Resu
     let publish_time = cast_external_timestamp(price.publish_time)?;
     let current_time = e.ledger().timestamp();
 
-    if is_stale(current_time, publish_time, config.max_staleness_seconds) {
+    if is_stale(current_time, publish_time, effective_max_staleness(config)) {
         return Err(ErrorCode::StalePrice);
     }
 
@@ -76,6 +79,7 @@ pub fn validate_oracle_staleness(
 ) -> Result<(), ErrorCode> {
     let num_oracles = config.min_responses.unwrap_or(1);
     let current_time = e.ledger().timestamp();
+    let max_staleness = effective_max_staleness(config);
     let mut any_found = false;
 
     for idx in 0..num_oracles {
@@ -87,7 +91,7 @@ pub fn validate_oracle_staleness(
         if let Some(update_time) = last_update {
             any_found = true;
             let age = current_time.saturating_sub(update_time);
-            if age > config.max_staleness_seconds {
+            if age > max_staleness {
                 return Err(ErrorCode::StalePrice);
             }
         }
@@ -171,6 +175,14 @@ pub fn cast_external_timestamp(ts: i64) -> Result<u64, ErrorCode> {
 pub fn is_stale(current_time: u64, result_time: u64, max_staleness_seconds: u64) -> bool {
     let age = current_time.saturating_sub(result_time);
     age > max_staleness_seconds
+}
+
+fn effective_max_staleness(config: &OracleConfig) -> u64 {
+    if config.max_staleness_seconds < MAX_STALENESS_SECONDS {
+        config.max_staleness_seconds
+    } else {
+        MAX_STALENESS_SECONDS
+    }
 }
 
 /// Convert i64 price to u64 absolute value, saturating i64::MIN to i64::MAX as u64.
