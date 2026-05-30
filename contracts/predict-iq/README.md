@@ -2,6 +2,16 @@
 
 Soroban smart contract for the PredictIQ prediction market platform.
 
+## WASM Size Limit
+
+The contract enforces a **64 KB (65,536 bytes)** WASM size limit. This is an internal budget target stricter than Soroban's actual limit, ensuring the contract remains performant and deployable across all networks. The limit is configured in `.github/workflows/test.yml` as `WASM_SIZE_LIMIT_BYTES` and checked during the build-optimized job.
+
+If the contract exceeds this limit, optimize by:
+- Removing unused dependencies
+- Refactoring large functions into separate modules
+- Using feature flags to conditionally compile code
+- Consulting the runbook: `docs/runbooks/high-contract-gas-costs.md`
+
 ## Event Schema
 
 All events emitted by this contract include a `version` field as the first element of the data payload. Indexers must check this field before decoding the rest of the payload to handle schema changes across contract upgrades.

@@ -38,6 +38,19 @@ infrastructure/
 - AWS CLI configured
 - Appropriate AWS IAM permissions
 - Access to Terraform state bucket
+- GitHub repository secrets configured (see Deployment Process section)
+
+## Required GitHub Secrets
+
+The deployment workflow requires the following secrets to be configured in repository settings:
+
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AWS_ROLE_DEV` | IAM role ARN for dev environment | `arn:aws:iam::123456789:role/terraform-dev` |
+| `AWS_ROLE_STAGING` | IAM role ARN for staging environment | `arn:aws:iam::123456789:role/terraform-staging` |
+| `AWS_ROLE_PROD` | IAM role ARN for production environment | `arn:aws:iam::123456789:role/terraform-prod` |
+
+**Note:** The deploy workflow validates these secrets before attempting deployment. If any are missing, the workflow will fail with a clear error message.
 
 ## Quick Start
 

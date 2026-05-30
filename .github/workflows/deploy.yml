@@ -16,9 +16,44 @@ env:
   TERRAFORM_VERSION: 1.5.0
 
 jobs:
+  validate-secrets:
+    name: Validate Required Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required secrets are set
+        run: |
+          MISSING=0
+          
+          # Check environment-specific secrets
+          if [ -z "${{ secrets.AWS_ROLE_DEV }}" ]; then
+            echo "❌ Missing secret: AWS_ROLE_DEV"
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.AWS_ROLE_STAGING }}" ]; then
+            echo "❌ Missing secret: AWS_ROLE_STAGING"
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.AWS_ROLE_PROD }}" ]; then
+            echo "❌ Missing secret: AWS_ROLE_PROD"
+            MISSING=1
+          fi
+          
+          if [ "$MISSING" -eq 1 ]; then
+            echo ""
+            echo "Deploy cannot proceed without required AWS role secrets."
+            echo "Configure the following in repository settings:"
+            echo "  - AWS_ROLE_DEV: IAM role ARN for dev environment"
+            echo "  - AWS_ROLE_STAGING: IAM role ARN for staging environment"
+            echo "  - AWS_ROLE_PROD: IAM role ARN for production environment"
+            exit 1
+          fi
+          
+          echo "✅ All required secrets are configured"
+
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    needs: validate-secrets
     strategy:
       matrix:
         environment: [dev, staging, prod]
