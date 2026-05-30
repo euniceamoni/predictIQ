@@ -13,7 +13,7 @@ interface StatisticsData {
 }
 
 export const Statistics: React.FC = () => {
-  const fetchStatistics = React.useCallback(() => api.getStatistics(), []);
+  const fetchStatistics = React.useCallback((signal: AbortSignal) => api.getStatistics(signal), []);
   const { data, loading, error, execute } = useAsync<StatisticsData>(
     fetchStatistics,
     { immediate: true }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface UseAsyncState<T> {
   data: T | null;
@@ -11,7 +11,7 @@ interface UseAsyncOptions {
 }
 
 export function useAsync<T>(
-  asyncFunction: () => Promise<T>,
+  asyncFunction: (signal: AbortSignal) => Promise<T>,
   options: UseAsyncOptions = {}
 ): UseAsyncState<T> & { execute: () => Promise<void> } {
   const [state, setState] = useState<UseAsyncState<T>>({
@@ -20,21 +20,38 @@ export function useAsync<T>(
     error: null,
   });
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef(true);
+
   const execute = useCallback(async () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    if (!isMountedRef.current) return;
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
-      const data = await asyncFunction();
-      setState({ data, loading: false, error: null });
+      const data = await asyncFunction(abortControllerRef.current.signal);
+      if (isMountedRef.current) {
+        setState({ data, loading: false, error: null });
+      }
     } catch (error) {
-      setState({ data: null, loading: false, error: error as Error });
+      if (isMountedRef.current && !(error instanceof DOMException && error.name === 'AbortError')) {
+        setState({ data: null, loading: false, error: error as Error });
+      }
     }
   }, [asyncFunction]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     if (options.immediate) {
       execute();
     }
+
+    return () => {
+      isMountedRef.current = false;
+      abortControllerRef.current?.abort();
+    };
   }, [execute, options.immediate]);
 
   return { ...state, execute };

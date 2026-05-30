@@ -2,6 +2,7 @@ import React from 'react';
 import { useI18n } from '../lib/hooks/useI18n';
 import { useDarkMode } from '../lib/hooks/useDarkMode';
 import { Statistics } from './Statistics';
+import { ErrorBoundary } from './ErrorBoundary';
 
 interface LandingPageProps {
   className?: string;
@@ -175,7 +176,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
         </section>
 
         {/* Statistics Section */}
-        <Statistics />
+        <ErrorBoundary section="statistics" fallback={
+          <section className="statistics" aria-labelledby="statistics-heading">
+            <h2 id="statistics-heading">Platform Statistics</h2>
+            <div className="error-message" role="alert">
+              <p>Unable to load statistics at this time. Please try again later.</p>
+            </div>
+          </section>
+        }>
+          <Statistics />
+        </ErrorBoundary>
 
         {/* Features Section */}
         <section aria-labelledby="features-heading" id="features">

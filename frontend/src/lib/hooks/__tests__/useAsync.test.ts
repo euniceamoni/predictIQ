@@ -61,4 +61,87 @@ describe('useAsync', () => {
 
     expect(result.current.data).toEqual(mockData);
   });
+
+  it('cancels request on unmount', async () => {
+    const mockFn = jest.fn(async (signal: AbortSignal) => {
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        setTimeout(resolve, 1000);
+      });
+      return { data: 'test' };
+    });
+
+    const { unmount } = renderHook(() => useAsync(mockFn, { immediate: true }));
+
+    unmount();
+
+    await waitFor(() => {
+      expect(mockFn).toHaveBeenCalled();
+    });
+  });
+
+  it('does not update state after unmount', async () => {
+    const mockData = { test: 'data' };
+    const mockFn = jest.fn(async (signal: AbortSignal) => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return mockData;
+    });
+
+    const { result, unmount } = renderHook(() => useAsync(mockFn, { immediate: true }));
+
+    unmount();
+
+    await waitFor(() => {
+      expect(result.current.data).toBeNull();
+    }, { timeout: 500 });
+  });
+
+  it('passes abort signal to async function', async () => {
+    const mockFn = jest.fn(async (signal: AbortSignal) => {
+      expect(signal).toBeInstanceOf(AbortSignal);
+      return { data: 'test' };
+    });
+
+    const { result } = renderHook(() => useAsync(mockFn, { immediate: true }));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(mockFn).toHaveBeenCalled();
+  });
+
+  it('aborts previous request when execute is called again', async () => {
+    let abortSignal1: AbortSignal | null = null;
+    let abortSignal2: AbortSignal | null = null;
+
+    const mockFn = jest.fn(async (signal: AbortSignal) => {
+      if (!abortSignal1) {
+        abortSignal1 = signal;
+      } else {
+        abortSignal2 = signal;
+      }
+      return { data: 'test' };
+    });
+
+    const { result } = renderHook(() => useAsync(mockFn));
+
+    act(() => {
+      result.current.execute();
+    });
+
+    await waitFor(() => {
+      expect(abortSignal1).not.toBeNull();
+    });
+
+    act(() => {
+      result.current.execute();
+    });
+
+    await waitFor(() => {
+      expect(abortSignal2).not.toBeNull();
+    });
+
+    expect(abortSignal1?.aborted).toBe(true);
+  });
 });

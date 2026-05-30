@@ -9,9 +9,35 @@ permissions:
   contents: write
 
 jobs:
+  validate-release:
+    name: Validate Release Tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+
+      - name: Validate CHANGELOG.md entry exists
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if ! grep -q "## \[$VERSION\]" CHANGELOG.md; then
+            echo "❌ CHANGELOG.md missing entry for version $VERSION"
+            echo "Add a section like: ## [$VERSION] - $(date +%Y-%m-%d)"
+            exit 1
+          fi
+          echo "✅ CHANGELOG.md entry found for version $VERSION"
+
   changelog:
     name: Generate Changelog & Release
     runs-on: ubuntu-latest
+    needs: validate-release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,3 +76,62 @@ jobs:
           name: release-notes
           path: CHANGELOG.md
           if-no-files-found: ignore
+
+  build-and-publish-wasm:
+    name: Build & Publish WASM Artifact
+    runs-on: ubuntu-latest
+    needs: validate-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: wasm32-unknown-unknown
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Soroban CLI
+        run: cargo install --locked soroban-cli --features opt
+
+      - name: Build optimized WASM
+        run: cargo build --target wasm32-unknown-unknown --release
+        working-directory: contracts/predict-iq
+
+      - name: Optimize WASM
+        run: |
+          soroban contract optimize \
+            --wasm target/wasm32-unknown-unknown/release/predict_iq.wasm \
+            --wasm-out target/wasm32-unknown-unknown/release/predict_iq_optimized.wasm
+        working-directory: contracts/predict-iq
+
+      - name: Verify WASM size
+        run: |
+          size=$(stat -c%s target/wasm32-unknown-unknown/release/predict_iq_optimized.wasm)
+          echo "Optimized WASM size: $size bytes"
+          if [ $size -gt ${{ env.WASM_SIZE_LIMIT_BYTES }} ]; then
+            echo "❌ WASM size $size exceeds limit of ${{ env.WASM_SIZE_LIMIT_BYTES }} bytes"
+            exit 1
+          fi
+          echo "✅ WASM size check passed"
+        working-directory: contracts/predict-iq
+        env:
+          WASM_SIZE_LIMIT_BYTES: "65536"
+
+      - name: Upload WASM to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: contracts/predict-iq/target/wasm32-unknown-unknown/release/predict_iq_optimized.wasm
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

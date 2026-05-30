@@ -21,20 +21,39 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit
 
-      - name: Audit Rust dependencies
+      - name: Audit contracts/predict-iq dependencies
         run: cargo audit --deny warnings
+        working-directory: contracts/predict-iq
         continue-on-error: true
 
-      - name: Audit Rust dependencies (fail on critical)
+      - name: Audit contracts/predict-iq (fail on critical)
         run: |
           output=$(cargo audit --json)
           critical=$(echo "$output" | jq '[.vulnerabilities[] | select(.advisory.severity == "critical")] | length')
           if [ "$critical" -gt 0 ]; then
-            echo "❌ Found $critical critical vulnerabilities"
+            echo "❌ Found $critical critical vulnerabilities in contracts/predict-iq"
             echo "$output" | jq '.vulnerabilities[] | select(.advisory.severity == "critical")'
             exit 1
           fi
-          echo "✅ No critical vulnerabilities found"
+          echo "✅ No critical vulnerabilities found in contracts/predict-iq"
+        working-directory: contracts/predict-iq
+
+      - name: Audit services/api dependencies
+        run: cargo audit --deny warnings
+        working-directory: services/api
+        continue-on-error: true
+
+      - name: Audit services/api (fail on critical)
+        run: |
+          output=$(cargo audit --json)
+          critical=$(echo "$output" | jq '[.vulnerabilities[] | select(.advisory.severity == "critical")] | length')
+          if [ "$critical" -gt 0 ]; then
+            echo "❌ Found $critical critical vulnerabilities in services/api"
+            echo "$output" | jq '.vulnerabilities[] | select(.advisory.severity == "critical")'
+            exit 1
+          fi
+          echo "✅ No critical vulnerabilities found in services/api"
+        working-directory: services/api
 
   scan-npm:
     name: Scan NPM Dependencies
@@ -68,6 +87,14 @@ jobs:
           echo "✅ No critical or high vulnerabilities found"
         working-directory: frontend
 
+      - name: Install TTS dependencies
+        run: npm ci
+        working-directory: services/tts
+
+      - name: Audit TTS NPM dependencies
+        run: npm audit --audit-level=high
+        working-directory: services/tts
+
   scan-trivy:
     name: Scan with Trivy
     runs-on: ubuntu-latest
@@ -82,6 +109,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
 
       - name: Upload Trivy results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
