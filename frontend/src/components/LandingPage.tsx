@@ -1,6 +1,7 @@
 import React from 'react';
 import { useI18n } from '../lib/hooks/useI18n';
 import { useDarkMode } from '../lib/hooks/useDarkMode';
+import { type Locale } from '../lib/i18n';
 import { Statistics } from './Statistics';
 import { ErrorBoundary } from './ErrorBoundary';
 
@@ -92,7 +93,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
                 <select
                   id="locale-select"
                   value={locale}
-                  onChange={(e) => setLocale(e.target.value as any)}
+                  onChange={(e) => setLocale(e.target.value as Locale)}
                   aria-label="Language selection"
                 >
                   {availableLocales.map((loc) => (
