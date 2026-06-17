@@ -213,15 +213,16 @@ async function request<T>(
           }
         }
 
-        let err: any;
+        let err: unknown;
         try {
           err = await res.json();
         } catch {
           err = {};
         }
-        const message = err?.message ?? res.statusText ?? `HTTP ${res.status}`;
-        const code = err?.code ?? "UNKNOWN_ERROR";
-        const details = err?.details ?? undefined;
+        const errObj = (typeof err === 'object' && err !== null) ? err as Record<string, unknown> : {};
+        const message = (errObj['message'] as string | undefined) ?? res.statusText ?? `HTTP ${res.status}`;
+        const code = (errObj['code'] as string | undefined) ?? "UNKNOWN_ERROR";
+        const details = errObj['details'] as Record<string, unknown> | undefined;
         throw new ApiError(message, res.status, code, details);
       }
 
