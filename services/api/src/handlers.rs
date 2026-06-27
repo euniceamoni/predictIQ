@@ -119,12 +119,15 @@ pub async fn health(State(state): State<Arc<AppState>>, headers: HeaderMap) -> i
         .and_then(|v| v.to_str().ok())
         .unwrap_or("-");
 
-    let cb_state = match state.cache.circuit_state() {
-        CircuitState::Closed => "closed",
-        CircuitState::Open => "open",
-        CircuitState::HalfOpen => "half_open",
+    let (cb_state, cb_state_val) = match state.cache.circuit_state() {
+        CircuitState::Closed => ("closed", 0),
+        CircuitState::Open => ("open", 1),
+        CircuitState::HalfOpen => ("half_open", 2),
     };
     let pool = state.cache.pool_status();
+    state
+        .metrics
+        .set_circuit_breaker_state(cb_state_val);
 
     let mut health_status = serde_json::json!({
         "status": "ok",
