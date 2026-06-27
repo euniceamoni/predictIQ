@@ -565,7 +565,9 @@ pub async fn statistics(State(state): State<Arc<AppState>>) -> Result<impl IntoR
     } else {
         state.metrics.observe_miss("api", endpoint);
     }
-    state.metrics.observe_request(endpoint, start.elapsed());
+    state
+        .metrics
+        .observe_request(endpoint, 200, start.elapsed().as_secs_f64());
 
     Ok((StatusCode::OK, Json(payload)))
 }
@@ -633,7 +635,7 @@ pub async fn featured_markets(
     } else {
         state.metrics.observe_miss("api", endpoint);
     }
-    state.metrics.observe_request(endpoint, start.elapsed());
+    state.metrics.observe_request(endpoint, 200, start.elapsed().as_secs_f64());
 
     Ok((StatusCode::OK, Json(paginated)))
 }
@@ -683,7 +685,7 @@ pub async fn content(
     } else {
         state.metrics.observe_miss("api", endpoint);
     }
-    state.metrics.observe_request(endpoint, start.elapsed());
+    state.metrics.observe_request(endpoint, 200, start.elapsed().as_secs_f64());
 
     Ok((StatusCode::OK, Json(paginated)))
 }
