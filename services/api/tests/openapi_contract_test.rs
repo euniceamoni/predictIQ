@@ -27,7 +27,7 @@ mod tests {
         ("POST", "/api/v1/newsletter/subscribe"),
         ("GET", "/api/v1/newsletter/confirm"),
         ("DELETE", "/api/v1/newsletter/unsubscribe"),
-        ("GET", "/api/v1/newsletter/gdpr/export"),
+        ("POST", "/api/v1/newsletter/gdpr/export"),
         ("DELETE", "/api/v1/newsletter/gdpr/delete"),
         ("GET", "/api/v1/email/preview/{template_name}"),
         ("POST", "/api/v1/email/test"),

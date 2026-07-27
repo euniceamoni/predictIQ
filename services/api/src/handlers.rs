@@ -366,6 +366,11 @@ pub struct NewsletterExportQuery {
     pub email: String,
 }
 
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+pub struct NewsletterExportBody {
+    pub email: String,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct NewsletterResponse {
     pub success: bool,
@@ -634,10 +639,10 @@ pub async fn newsletter_unsubscribe(
 }
 
 #[utoipa::path(
-    get,
+    post,
     path = "/api/v1/newsletter/gdpr/export",
     tag = "newsletter",
-    params(NewsletterExportQuery),
+    request_body = NewsletterExportBody,
     responses(
         (status = 200, description = "GDPR data export", body = NewsletterExportResponse),
         (status = 400, description = "Invalid email", body = NewsletterResponse),
@@ -649,7 +654,7 @@ pub async fn newsletter_gdpr_export(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     connect_info: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
-    Query(query): Query<NewsletterExportQuery>,
+    Json(body): Json<NewsletterExportBody>,
 ) -> Result<Response, ApiError> {
     use crate::security::extract_client_ip_cidrs;
     let ip = extract_client_ip_cidrs(
@@ -677,7 +682,7 @@ pub async fn newsletter_gdpr_export(
             .into_response());
     }
 
-    let Some(email) = normalized_email(&query.email) else {
+    let Some(email) = normalized_email(&body.email) else {
         return Ok((
             StatusCode::BAD_REQUEST,
             Json(NewsletterResponse {

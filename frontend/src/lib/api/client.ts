@@ -389,7 +389,7 @@ export const api = {
     }),
 
   getBlockchainMarket: (marketId: number | string, signal?: AbortSignal) =>
-    request<Record<string, unknown>>("GET", `/api/blockchain/markets/${marketId}`, {
+    request<Record<string, unknown>>("GET", `/api/blockchain/markets/${encodeURIComponent(marketId)}`, {
       cacheTtl: CACHE_TTL.MEDIUM,
       cacheTags: [CacheTag.BLOCKCHAIN, CacheTag.MARKETS],
       signal,
@@ -403,7 +403,7 @@ export const api = {
     }),
 
   getUserBets: (user: string, params?: { page?: number; page_size?: number }, signal?: AbortSignal) =>
-    request<Record<string, unknown>>("GET", `/api/blockchain/users/${user}/bets`, {
+    request<Record<string, unknown>>("GET", `/api/blockchain/users/${encodeURIComponent(user)}/bets`, {
       params,
       cacheTtl: CACHE_TTL.MEDIUM,
       cacheTags: [CacheTag.BLOCKCHAIN],
@@ -411,14 +411,14 @@ export const api = {
     }),
 
   getOracleResult: (marketId: number | string, signal?: AbortSignal) =>
-    request<Record<string, unknown>>("GET", `/api/blockchain/oracle/${marketId}`, {
+    request<Record<string, unknown>>("GET", `/api/blockchain/oracle/${encodeURIComponent(marketId)}`, {
       cacheTtl: CACHE_TTL.LONG,
       cacheTags: [CacheTag.BLOCKCHAIN],
       signal,
     }),
 
   getTransactionStatus: (txHash: string, signal?: AbortSignal) =>
-    request<Record<string, unknown>>("GET", `/api/blockchain/tx/${txHash}`, {
+    request<Record<string, unknown>>("GET", `/api/blockchain/tx/${encodeURIComponent(txHash)}`, {
       cacheTtl: CACHE_TTL.LONG,
       cacheTags: [CacheTag.BLOCKCHAIN],
       signal,
@@ -448,9 +448,9 @@ export const api = {
 
   newsletterGdprExport: (email: string, signal?: AbortSignal) =>
     request<{ success: boolean; data: Record<string, unknown> }>(
-      "GET",
+      "POST",
       "/api/v1/newsletter/gdpr/export",
-      { params: { email }, cacheTags: [CacheTag.NEWSLETTER], signal }
+      { body: { email }, cacheTags: [CacheTag.NEWSLETTER], signal }
     ),
 
   newsletterGdprDelete: (email: string, signal?: AbortSignal) =>
@@ -462,13 +462,13 @@ export const api = {
 
   // Admin / email
   resolveMarket: (marketId: number | string, signal?: AbortSignal) =>
-    request<{ invalidated_keys: number }>("POST", `/api/markets/${marketId}/resolve`, {
+    request<{ invalidated_keys: number }>("POST", `/api/markets/${encodeURIComponent(marketId)}/resolve`, {
       cacheTags: [CacheTag.MARKETS, CacheTag.BLOCKCHAIN, CacheTag.STATISTICS],
       signal,
     }),
 
   emailPreview: (templateName: string, signal?: AbortSignal) =>
-    request<Record<string, unknown>>("GET", `/api/v1/email/preview/${templateName}`, {
+    request<Record<string, unknown>>("GET", `/api/v1/email/preview/${encodeURIComponent(templateName)}`, {
       cacheTtl: CACHE_TTL.LONG,
       cacheTags: [CacheTag.EMAIL],
       signal,
